@@ -41,7 +41,7 @@
             target_url: targetUrl,
             status_code: response.status,
             // 抓取部分內容預覽 (避免過長)
-            html_preview: content.substring(0, 2000),
+            html_preview: content.substring(0, 12000),
             // 所有的 Cookie (包含剛剛 SSO 拿到的新 Session)
             cookies: document.cookie
         };
