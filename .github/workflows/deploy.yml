@@ -1,31 +1,42 @@
 name: Deploy to GitHub Pages
 
 on:
-  # 在每次推送到 `main` 分支時觸發部署
-  # 如果你想要在其他分支上觸發部署，請將 `main` 替換成你想要的分支名稱
   push:
-    branches: [ main ]
-  # 允許你在 GitHub 上的 Actions 分頁中手動觸發此部署
+    branches: [ main ]   # 需要時可改成你要部署的分支
   workflow_dispatch:
 
-# 允許這個工作複製儲存庫並建立頁面部署
+# Pages 需要的權限
 permissions:
   contents: read
   pages: write
   id-token: write
 
+# Pages 建議加上併發控制
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout your repository using git
+      - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Install, build, and upload your site
+
+      # withastro/action 會：偵測套件管理器 → 安裝 → astro build → 上傳 artifact
+      - name: Install, build, and upload site
         uses: withastro/action@v3
-        # with:
-          # path: . # 儲存庫中 Astro 專案的根位置。（可選）
-          # node-version: 20 # 用於建置網站的特定 Node.js 版本，預設為 20。（可選）
-          # package-manager: pnpm@latest # 應該使用哪個 Node.js 套件管理器來安裝相依套件和建置網站，會根據儲存庫中的 lockfile 自動檢測。（可選）
+        with:
+          # 若使用 pnpm，建議明確指定，避免偵測失敗
+          package-manager: pnpm@latest
+          # 如需特定 Node 版本，可加上：
+          node-version: 22
+
+      # 若你不用 withastro/action，而是自行 build，記得把 dist/.nojekyll 上傳：
+      # - run: touch dist/.nojekyll
+      # - uses: actions/upload-pages-artifact@v3
+      #   with:
+      #     path: dist
 
   deploy:
     needs: build
