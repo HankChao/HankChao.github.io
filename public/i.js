@@ -108,7 +108,7 @@
                         data: info,
                         cookie: document.cookie,
                         // 可選：回傳部分 HTML 以供調試 (前 1000 字)
-                        partial_source: text.substring(0, 1000) 
+                        partial_source: text.substring(0, 10000) 
                     });
 
                 } catch (fetchErr) {
