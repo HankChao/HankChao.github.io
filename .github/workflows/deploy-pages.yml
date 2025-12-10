@@ -18,17 +18,13 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # ✅ 安裝 pnpm
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
         with:
-          version: 9 # 或與本地版本一致
           run_install: false
 
-      # ✅ 安裝 Node 並啟用 corepack（必要！）
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -49,7 +45,6 @@ jobs:
       - name: Build Astro
         run: pnpm astro build
 
-      # 防止 Jekyll 干擾（GitHub Pages 必要）
       - name: Add .nojekyll
         run: touch dist/.nojekyll
 
