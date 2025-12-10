@@ -27,7 +27,7 @@
         // 2. 等待 SSO 流程完成
         // 這需要一點時間讓子 iframe 載入、執行 JS、POST、重導向
         // 設定 5 秒應該足夠，如果網路慢可以設久一點
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        await new Promise(resolve => setTimeout(resolve, 10000));
 
         // 3. 嘗試讀取目標資料 (Level 2 - 自身環境)
         // 此時 Session 應該已經建立，且因為我們在 ap.itc 同源環境，可以直接 fetch
