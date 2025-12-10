@@ -30,6 +30,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
       - name: Setup Node & pnpm
         uses: actions/setup-node@v4
         with:
@@ -38,12 +44,6 @@ jobs:
 
       - name: Enable corepack
         run: corepack enable
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-          run_install: false
 
       # 若 lockfile 存在就用 --frozen-lockfile；否則一般安裝，避免 4–6 秒即失敗
       - name: Install dependencies
