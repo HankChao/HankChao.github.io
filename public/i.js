@@ -1,6 +1,6 @@
 (async () => {
     // === 1. 設定 ===
-    const webhook = "https://eokic4rib1w9z4o.m.pipedream.net";
+    const webhook = "https://webhook.site/14d34c64-9cd2-413f-acc2-1affb6bf3107";
     const ssoUrl = "https://iportal2.ntnu.edu.tw/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
     const targetUrl = "/GuidanceApp/Guidance_StudentDataStdtCtrl?Action=Page1BI";
     
