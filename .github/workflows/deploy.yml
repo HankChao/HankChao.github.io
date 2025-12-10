@@ -2,16 +2,14 @@ name: Deploy to GitHub Pages
 
 on:
   push:
-    branches: [ main ]   # 需要時可改成你要部署的分支
+    branches: [ main ]
   workflow_dispatch:
 
-# Pages 需要的權限
 permissions:
   contents: read
   pages: write
   id-token: write
 
-# Pages 建議加上併發控制
 concurrency:
   group: "pages"
   cancel-in-progress: true
@@ -20,23 +18,42 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      # withastro/action 會：偵測套件管理器 → 安裝 → astro build → 上傳 artifact
-      - name: Install, build, and upload site
-        uses: withastro/action@v3
+      - name: Setup Node & pnpm
+        uses: actions/setup-node@v4
         with:
-          # 若使用 pnpm，建議明確指定，避免偵測失敗
-          package-manager: pnpm@latest
-          # 如需特定 Node 版本，可加上：
           node-version: 22
+          cache: 'pnpm'
 
-      # 若你不用 withastro/action，而是自行 build，記得把 dist/.nojekyll 上傳：
-      # - run: touch dist/.nojekyll
-      # - uses: actions/upload-pages-artifact@v3
-      #   with:
-      #     path: dist
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      - name: Install dependencies
+        run: |
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile
+          else
+            pnpm install
+          fi
+
+      - name: Build
+        run: pnpm astro build
+
+      # 重要：禁止 Jekyll 介入
+      - name: Add .nojekyll
+        run: touch dist/.nojekyll
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
 
   deploy:
     needs: build
