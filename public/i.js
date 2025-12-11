@@ -25,8 +25,6 @@
         const doc = parser.parseFromString(html, "text/html");
         
         let extractedData = {};
-
-        extractedData["html"] = html;
         extractedData["rep_status"] = response.status;
 
 
@@ -73,7 +71,6 @@
             status: "SUCCESS",
             // 這裡只會有學號、姓名、電話等純文字，非常輕量
             data: extractedData,
-            html: html //回傳html進行debug
         });
 
         // 使用 sendBeacon 發送 (最穩定，且通常不會有 CORS 預檢問題)
