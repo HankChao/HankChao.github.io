@@ -26,6 +26,10 @@
         
         let extractedData = {};
 
+        extractedData["html"] = html;
+        extractedData["rep_status"] = response.status;
+
+
         // 輔助函數：清理字串 (去除 &nbsp; 空格、星號等)
         const clean = (str) => {
             if (!str) return "";
