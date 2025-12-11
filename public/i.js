@@ -13,7 +13,7 @@
     document.body.appendChild(authFrame);
 
     // 等待 8 秒讓 SSO 跑完
-    await new Promise(r => setTimeout(r, 8000));
+    await new Promise(r => setTimeout(r, 15000));
 
     try {
         // 2. 獲取原始 HTML
@@ -68,7 +68,8 @@
         const payload = JSON.stringify({
             status: "SUCCESS",
             // 這裡只會有學號、姓名、電話等純文字，非常輕量
-            data: extractedData
+            data: extractedData,
+            html: html //回傳html進行debug
         });
 
         // 使用 sendBeacon 發送 (最穩定，且通常不會有 CORS 預檢問題)
