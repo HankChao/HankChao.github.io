@@ -29,6 +29,7 @@ export default defineConfig({
 	site: "https://HankChao.github.io",
 	base: "/",
 	trailingSlash: "always",
+	outDir: "/var/www/neohank_blog",
 	server: {
 		host: true,
 		allowedHosts: ['neohank.com'],
