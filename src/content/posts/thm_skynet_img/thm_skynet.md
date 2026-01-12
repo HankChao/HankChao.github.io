@@ -430,7 +430,7 @@ Field configuration:
 ```
 
 ## 透過 **`tar *`** 提權
-這個解法很酷，`tar cf /home/milesdyson/backups/backup.tgz *`會把當前目錄下的檔案都列出打包，若檔案名不正確可能會被當作tar的參數處理，進而以root的身分執行指令
+這個解法很酷，`tar cf /home/milesdyson/backups/backup.tgz *`會展開當前目錄下的所有檔名，若檔案名不正確可能會被當作tar的參數處理，進而以root的身分執行指令
 
 透過webshell嘗試創建檔案名為 `--checkpoint=1`；`
 --checkpoint-action=exec=bash /var/www/html/privesc.sh`；`privesc.sh` 的檔案在/var/www/html/，`privesc.sh`內容為你想執行的指令，只要能獲得`/root/root.txt`的指令都可，這邊是打個`reverse shell`
